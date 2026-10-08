@@ -2,6 +2,7 @@ from sqlalchemy import text
 
 from app.database import engine
 
+from datetime import datetime
 
 shelters = [
     {
@@ -104,3 +105,60 @@ with engine.begin() as connection:
 
 
 print("Shelter seed process completed!")    
+
+with engine.begin() as connection:
+
+    existing = connection.execute(
+        text("""
+            SELECT id
+            FROM risk_observations
+            WHERE latitude = :latitude
+              AND longitude = :longitude
+        """),
+        {
+            "latitude": 18.5250,
+            "longitude": 73.8567,
+        }
+    ).fetchone()
+
+    if existing:
+        print("Demo risk observation already exists.")
+    else:
+        connection.execute(
+            text("""
+                INSERT INTO risk_observations (
+                    latitude,
+                    longitude,
+                    location,
+                    rainfall_mm,
+                    water_level_m,
+                    elevation_m,
+                    historical_risk,
+                    observed_at
+                )
+                VALUES (
+                    :latitude,
+                    :longitude,
+                    ST_SetSRID(
+                        ST_MakePoint(:longitude, :latitude),
+                        4326
+                    ),
+                    :rainfall_mm,
+                    :water_level_m,
+                    :elevation_m,
+                    :historical_risk,
+                    :observed_at
+                )
+            """),
+            {
+                "latitude": 18.5250,
+                "longitude": 73.8567,
+                "rainfall_mm": 85.0,
+                "water_level_m": 4.2,
+                "elevation_m": 560.0,
+                "historical_risk": 0.65,
+                "observed_at": datetime.now(),
+            }
+        )
+
+        print("Demo risk observation added successfully!")
