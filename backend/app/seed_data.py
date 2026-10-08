@@ -103,4 +103,4 @@ with engine.begin() as connection:
         print(f"Added: {shelter['name']}")
 
 
-print("Shelter seed process completed!")
+print("Shelter seed process completed!")    
