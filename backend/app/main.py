@@ -27,10 +27,11 @@ def health_check():
     }
 
 
-@app.get("/api/shelters/nearest")
-def get_nearest_shelter(
+@app.get("/api/shelters/recommend")
+def recommend_shelters(
     latitude: float = Query(...),
-    longitude: float = Query(...)
+    longitude: float = Query(...),
+    people: int = Query(1, ge=1)
 ):
     with engine.connect() as connection:
         result = connection.execute(
@@ -42,9 +43,11 @@ def get_nearest_shelter(
                     longitude,
                     capacity,
                     current_occupancy,
+                    (capacity - current_occupancy) AS available_capacity,
                     has_medical,
                     has_food,
                     has_water,
+
                     ST_Distance(
                         location::geography,
                         ST_SetSRID(
@@ -52,33 +55,53 @@ def get_nearest_shelter(
                             4326
                         )::geography
                     ) AS distance_meters
+
                 FROM shelters
+
                 WHERE is_active = TRUE
-                ORDER BY distance_meters
-                LIMIT 1
+                  AND (capacity - current_occupancy) >= :people
+
+                ORDER BY
+                    (
+                        ST_Distance(
+                            location::geography,
+                            ST_SetSRID(
+                                ST_MakePoint(:longitude, :latitude),
+                                4326
+                            )::geography
+                        )
+                        - CASE WHEN has_medical THEN 300 ELSE 0 END
+                        - CASE WHEN has_water THEN 150 ELSE 0 END
+                        - CASE WHEN has_food THEN 150 ELSE 0 END
+                    )
+
+                LIMIT 5
             """),
             {
                 "latitude": latitude,
-                "longitude": longitude
+                "longitude": longitude,
+                "people": people
             }
         )
 
-        shelter = result.fetchone()
-
-        if not shelter:
-            return {
-                "message": "No active shelters found."
-            }
+        shelters = result.fetchall()
 
         return {
-            "id": shelter.id,
-            "name": shelter.name,
-            "latitude": shelter.latitude,
-            "longitude": shelter.longitude,
-            "capacity": shelter.capacity,
-            "current_occupancy": shelter.current_occupancy,
-            "has_medical": shelter.has_medical,
-            "has_food": shelter.has_food,
-            "has_water": shelter.has_water,
-            "distance_meters": round(shelter.distance_meters, 2)
+            "requested_people": people,
+            "recommendations": [
+                {
+                    "id": shelter.id,
+                    "name": shelter.name,
+                    "latitude": shelter.latitude,
+                    "longitude": shelter.longitude,
+                    "capacity": shelter.capacity,
+                    "current_occupancy": shelter.current_occupancy,
+                    "available_capacity": shelter.available_capacity,
+                    "has_medical": shelter.has_medical,
+                    "has_food": shelter.has_food,
+                    "has_water": shelter.has_water,
+                    "distance_meters": round(shelter.distance_meters, 2)
+                }
+                for shelter in shelters
+            ]
         }
