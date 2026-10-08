@@ -34,94 +34,63 @@ def recommend_shelters(
     people: int = Query(1, ge=1)
 ):
     with engine.connect() as connection:
+
         result = connection.execute(
             text("""
                 SELECT
-                    id,
-                    name,
-                    latitude,
-                    longitude,
-                    capacity,
-                    current_occupancy,
-                    (capacity - current_occupancy) AS available_capacity,
-                    has_medical,
-                    has_food,
-                    has_water,
+                    s.id,
+                    s.name,
+                    s.latitude,
+                    s.longitude,
+                    s.capacity,
+                    s.current_occupancy,
+
+                    (s.capacity - s.current_occupancy)
+                        AS available_capacity,
+
+                    s.has_medical,
+                    s.has_food,
+                    s.has_water,
 
                     ST_Distance(
-                        location::geography,
+                        s.location::geography,
                         ST_SetSRID(
                             ST_MakePoint(:longitude, :latitude),
                             4326
                         )::geography
                     ) AS distance_meters,
 
-                    -- Distance score: maximum 40 points
-                    GREATEST(
-                        0,
-                        40 - (
-                            ST_Distance(
-                                location::geography,
-                                ST_SetSRID(
-                                    ST_MakePoint(:longitude, :latitude),
-                                    4326
-                                )::geography
-                            ) / 100
-                        )
-                    ) AS distance_score,
+                    r.rainfall_mm,
+                    r.water_level_m,
+                    r.elevation_m,
+                    r.historical_risk,
 
-                    -- Capacity score: maximum 30 points
-                    LEAST(
-                        30,
-                        (
-                            (capacity - current_occupancy)::float
-                            / :people
-                        ) * 15
-                    ) AS capacity_score,
+                    ST_Distance(
+                        r.location::geography,
+                        s.location::geography
+                    ) AS risk_observation_distance
 
-                    -- Facility score: maximum 30 points
-                    (
-                        CASE WHEN has_medical THEN 10 ELSE 0 END +
-                        CASE WHEN has_food THEN 10 ELSE 0 END +
-                        CASE WHEN has_water THEN 10 ELSE 0 END
-                    ) AS facility_score
+                FROM shelters s
 
-                FROM shelters
+                LEFT JOIN LATERAL (
+                    SELECT
+                        rainfall_mm,
+                        water_level_m,
+                        elevation_m,
+                        historical_risk,
+                        location
+                    FROM risk_observations r
+                    ORDER BY ST_Distance(
+                        r.location::geography,
+                        s.location::geography
+                    )
+                    LIMIT 1
+                ) r ON TRUE
 
-                WHERE is_active = TRUE
-                  AND (capacity - current_occupancy) >= :people
+                WHERE s.is_active = TRUE
+                  AND (s.capacity - s.current_occupancy) >= :people
 
-                ORDER BY
-                    (
-                        GREATEST(
-                            0,
-                            40 - (
-                                ST_Distance(
-                                    location::geography,
-                                    ST_SetSRID(
-                                        ST_MakePoint(:longitude, :latitude),
-                                        4326
-                                    )::geography
-                                ) / 100
-                            )
-                        )
-                        +
-                        LEAST(
-                            30,
-                            (
-                                (capacity - current_occupancy)::float
-                                / :people
-                            ) * 15
-                        )
-                        +
-                        CASE WHEN has_medical THEN 10 ELSE 0 END
-                        +
-                        CASE WHEN has_food THEN 10 ELSE 0 END
-                        +
-                        CASE WHEN has_water THEN 10 ELSE 0 END
-                    ) DESC
-
-                LIMIT 5
+                ORDER BY distance_meters
             """),
             {
                 "latitude": latitude,
@@ -132,20 +101,152 @@ def recommend_shelters(
 
         shelters = result.fetchall()
 
+        if not shelters:
+            return {
+                "message": "No suitable shelters found for the requested number of people."
+            }
+
         recommendations = []
 
         for shelter in shelters:
 
-            suitability_score = (
-                shelter.distance_score
-                + shelter.capacity_score
-                + shelter.facility_score
+            # -----------------------------------
+            # 1. Distance Score - Maximum 40
+            # -----------------------------------
+
+            distance_score = max(
+                0,
+                40 - (shelter.distance_meters / 100)
             )
+
+            # -----------------------------------
+            # 2. Capacity Score - Maximum 30
+            # -----------------------------------
+
+            capacity_score = min(
+                30,
+                (shelter.available_capacity / people) * 15
+            )
+
+            # -----------------------------------
+            # 3. Facility Score - Maximum 30
+            # -----------------------------------
+
+            facility_score = 0
+
+            if shelter.has_medical:
+                facility_score += 10
+
+            if shelter.has_food:
+                facility_score += 10
+
+            if shelter.has_water:
+                facility_score += 10
+
+            # Existing shelter suitability score
+            suitability_score = (
+                distance_score +
+                capacity_score +
+                facility_score
+            )
+
+            suitability_score = min(
+                100,
+                suitability_score
+            )
+
+            # -----------------------------------
+            # 4. Disaster Risk Score
+            # -----------------------------------
+
+            if shelter.rainfall_mm is not None:
+
+                rainfall_score = min(
+                    shelter.rainfall_mm / 100,
+                    1
+                )
+
+                water_level_score = min(
+                    shelter.water_level_m / 5,
+                    1
+                )
+
+                elevation_score = max(
+                    0,
+                    min(
+                        (600 - shelter.elevation_m) / 200,
+                        1
+                    )
+                )
+
+                historical_score = max(
+                    0,
+                    min(
+                        shelter.historical_risk,
+                        1
+                    )
+                )
+
+                risk_score = (
+                    rainfall_score * 0.35 +
+                    water_level_score * 0.35 +
+                    elevation_score * 0.10 +
+                    historical_score * 0.20
+                ) * 100
+
+                risk_score = round(
+                    risk_score,
+                    2
+                )
+
+                # Higher risk = lower safety score
+                safety_score = 100 - risk_score
+
+                if risk_score < 30:
+                    risk_level = "LOW"
+
+                elif risk_score < 55:
+                    risk_level = "MODERATE"
+
+                elif risk_score < 75:
+                    risk_level = "HIGH"
+
+                else:
+                    risk_level = "CRITICAL"
+
+            else:
+                risk_score = None
+                safety_score = None
+                risk_level = "UNKNOWN"
+
+            # -----------------------------------
+            # 5. Risk-Adjusted Recommendation
+            # -----------------------------------
+
+            if safety_score is not None:
+
+                final_score = (
+                    suitability_score * 0.70
+                    + safety_score * 0.30
+                )
+
+            else:
+
+                final_score = suitability_score
+
+            final_score = round(
+                final_score,
+                2
+            )
+
+            # -----------------------------------
+            # Recommendation Reasons
+            # -----------------------------------
 
             reasons = []
 
             if shelter.has_medical:
-                reasons.append("medical support")
+                reasons.append("medical support available")
 
             if shelter.has_food:
                 reasons.append("food available")
@@ -155,8 +256,21 @@ def recommend_shelters(
 
             if shelter.available_capacity >= people * 2:
                 reasons.append("high available capacity")
+
             else:
                 reasons.append("sufficient capacity")
+
+            if risk_level == "LOW":
+                reasons.append("low disaster risk")
+
+            elif risk_level == "MODERATE":
+                reasons.append("moderate disaster risk")
+
+            elif risk_level == "HIGH":
+                reasons.append("high disaster risk")
+
+            elif risk_level == "CRITICAL":
+                reasons.append("critical disaster risk")
 
             recommendations.append(
                 {
@@ -164,27 +278,53 @@ def recommend_shelters(
                     "name": shelter.name,
                     "latitude": shelter.latitude,
                     "longitude": shelter.longitude,
+
                     "capacity": shelter.capacity,
                     "current_occupancy": shelter.current_occupancy,
                     "available_capacity": shelter.available_capacity,
+
                     "has_medical": shelter.has_medical,
                     "has_food": shelter.has_food,
                     "has_water": shelter.has_water,
+
                     "distance_meters": round(
                         shelter.distance_meters,
                         2
                     ),
+
                     "suitability_score": round(
                         suitability_score,
                         2
                     ),
-                    "reason": ", ".join(reasons)
+
+                    "risk_score": risk_score,
+                    "risk_level": risk_level,
+
+                    "safety_score": (
+                        round(safety_score, 2)
+                        if safety_score is not None
+                        else None
+                    ),
+
+                    "final_score": final_score,
+
+                    "reasons": reasons
                 }
             )
 
+        # Highest final score = best recommendation
+        recommendations.sort(
+            key=lambda x: x["final_score"],
+            reverse=True
+        )
+
         return {
             "requested_people": people,
-            "recommendations": recommendations
+            "user_location": {
+                "latitude": latitude,
+                "longitude": longitude
+            },
+            "recommendations": recommendations[:5]
         }
 
 @app.get("/api/risk/nearest")
