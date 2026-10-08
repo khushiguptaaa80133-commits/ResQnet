@@ -54,7 +54,37 @@ def recommend_shelters(
                             ST_MakePoint(:longitude, :latitude),
                             4326
                         )::geography
-                    ) AS distance_meters
+                    ) AS distance_meters,
+
+                    -- Distance score: maximum 40 points
+                    GREATEST(
+                        0,
+                        40 - (
+                            ST_Distance(
+                                location::geography,
+                                ST_SetSRID(
+                                    ST_MakePoint(:longitude, :latitude),
+                                    4326
+                                )::geography
+                            ) / 100
+                        )
+                    ) AS distance_score,
+
+                    -- Capacity score: maximum 30 points
+                    LEAST(
+                        30,
+                        (
+                            (capacity - current_occupancy)::float
+                            / :people
+                        ) * 15
+                    ) AS capacity_score,
+
+                    -- Facility score: maximum 30 points
+                    (
+                        CASE WHEN has_medical THEN 10 ELSE 0 END +
+                        CASE WHEN has_food THEN 10 ELSE 0 END +
+                        CASE WHEN has_water THEN 10 ELSE 0 END
+                    ) AS facility_score
 
                 FROM shelters
 
@@ -63,17 +93,33 @@ def recommend_shelters(
 
                 ORDER BY
                     (
-                        ST_Distance(
-                            location::geography,
-                            ST_SetSRID(
-                                ST_MakePoint(:longitude, :latitude),
-                                4326
-                            )::geography
+                        GREATEST(
+                            0,
+                            40 - (
+                                ST_Distance(
+                                    location::geography,
+                                    ST_SetSRID(
+                                        ST_MakePoint(:longitude, :latitude),
+                                        4326
+                                    )::geography
+                                ) / 100
+                            )
                         )
-                        - CASE WHEN has_medical THEN 300 ELSE 0 END
-                        - CASE WHEN has_water THEN 150 ELSE 0 END
-                        - CASE WHEN has_food THEN 150 ELSE 0 END
-                    )
+                        +
+                        LEAST(
+                            30,
+                            (
+                                (capacity - current_occupancy)::float
+                                / :people
+                            ) * 15
+                        )
+                        +
+                        CASE WHEN has_medical THEN 10 ELSE 0 END
+                        +
+                        CASE WHEN has_food THEN 10 ELSE 0 END
+                        +
+                        CASE WHEN has_water THEN 10 ELSE 0 END
+                    ) DESC
 
                 LIMIT 5
             """),
@@ -86,9 +132,33 @@ def recommend_shelters(
 
         shelters = result.fetchall()
 
-        return {
-            "requested_people": people,
-            "recommendations": [
+        recommendations = []
+
+        for shelter in shelters:
+
+            suitability_score = (
+                shelter.distance_score
+                + shelter.capacity_score
+                + shelter.facility_score
+            )
+
+            reasons = []
+
+            if shelter.has_medical:
+                reasons.append("medical support")
+
+            if shelter.has_food:
+                reasons.append("food available")
+
+            if shelter.has_water:
+                reasons.append("water available")
+
+            if shelter.available_capacity >= people * 2:
+                reasons.append("high available capacity")
+            else:
+                reasons.append("sufficient capacity")
+
+            recommendations.append(
                 {
                     "id": shelter.id,
                     "name": shelter.name,
@@ -100,8 +170,19 @@ def recommend_shelters(
                     "has_medical": shelter.has_medical,
                     "has_food": shelter.has_food,
                     "has_water": shelter.has_water,
-                    "distance_meters": round(shelter.distance_meters, 2)
+                    "distance_meters": round(
+                        shelter.distance_meters,
+                        2
+                    ),
+                    "suitability_score": round(
+                        suitability_score,
+                        2
+                    ),
+                    "reason": ", ".join(reasons)
                 }
-                for shelter in shelters
-            ]
+            )
+
+        return {
+            "requested_people": people,
+            "recommendations": recommendations
         }
