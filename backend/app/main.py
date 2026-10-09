@@ -12,13 +12,16 @@ app = FastAPI(
     version="1.0.0"
 )
 
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
+        "http://localhost:5174",
+        "http://127.0.0.1:5174",
         "http://localhost:5173",
         "http://127.0.0.1:5173",
     ],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -339,6 +342,53 @@ def recommend_shelters(
             },
             "recommendations": recommendations[:5]
         }
+
+
+@app.get("/api/shelters")
+def get_shelters():
+    with engine.connect() as connection:
+        result = connection.execute(
+            text("""
+                SELECT
+                    s.id,
+                    s.name,
+                    s.latitude,
+                    s.longitude,
+                    s.capacity,
+                    s.current_occupancy,
+                    (s.capacity - s.current_occupancy)
+                        AS available_capacity,
+                    s.has_medical,
+                    s.has_food,
+                    s.has_water,
+                    s.is_active
+                FROM shelters s
+                WHERE s.is_active = TRUE
+                ORDER BY s.name
+            """)
+        )
+
+        shelters = result.fetchall()
+
+    return {
+        "count": len(shelters),
+        "shelters": [
+            {
+                "id": shelter.id,
+                "name": shelter.name,
+                "latitude": shelter.latitude,
+                "longitude": shelter.longitude,
+                "capacity": shelter.capacity,
+                "current_occupancy": shelter.current_occupancy,
+                "available_capacity": shelter.available_capacity,
+                "has_medical": shelter.has_medical,
+                "has_food": shelter.has_food,
+                "has_water": shelter.has_water,
+                "is_active": shelter.is_active,
+            }
+            for shelter in shelters
+        ],
+    }
 
 @app.get("/api/risk/nearest")
 def get_nearest_risk(

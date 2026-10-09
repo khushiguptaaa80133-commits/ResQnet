@@ -3,11 +3,13 @@ import {
   Circle,
   CircleMarker,
   MapContainer,
+  Marker,
   TileLayer,
   Tooltip,
   useMap,
 } from "react-leaflet";
 import { useEffect } from "react";
+import L from "leaflet";
 import type { LatLngExpression } from "leaflet";
 import "leaflet/dist/leaflet.css";
 
@@ -25,8 +27,23 @@ type RiskObservation = {
   risk_level: RiskLevel;
 };
 
+type Shelter = {
+  id: number;
+  name: string;
+  latitude: number;
+  longitude: number;
+  capacity: number;
+  current_occupancy: number;
+  available_capacity: number;
+  has_medical: boolean;
+  has_food: boolean;
+  has_water: boolean;
+  is_active: boolean;
+};
+
 type RiskMapProps = {
   observations: RiskObservation[];
+  shelters: Shelter[];
   userLocation: {
     latitude: number;
     longitude: number;
@@ -46,6 +63,13 @@ const riskDescriptions: Record<RiskLevel, string> = {
   MODERATE: "30–54.99 · Moderate risk",
   LOW: "0–29.99 · Low risk",
 };
+
+const shelterIcon = L.divIcon({
+  className: "resqnet-shelter-icon",
+  html: '<div class="shelter-marker-pin">S</div>',
+  iconSize: [32, 32],
+  iconAnchor: [16, 16],
+});
 
 function MapRefresher({
   position,
@@ -77,7 +101,7 @@ function RiskLegend() {
 
   return (
     <div className="risk-map-legend">
-      <strong>Risk level</strong>
+      <strong>Map legend</strong>
 
       {levels.map((level) => (
         <div className="risk-legend-item" key={level}>
@@ -92,8 +116,24 @@ function RiskLegend() {
         </div>
       ))}
 
+      <div className="risk-legend-item">
+        <span className="shelter-legend-marker">S</span>
+        <div>
+          <span className="risk-legend-label">SHELTER</span>
+          <small>Click for capacity and facilities</small>
+        </div>
+      </div>
+
+      <div className="risk-legend-item">
+        <span className="user-legend-marker" />
+        <div>
+          <span className="risk-legend-label">USER</span>
+          <small>Configured demo location</small>
+        </div>
+      </div>
+
       <p className="risk-legend-note">
-        Circles show illustrative areas around demo observations,
+        Risk circles are illustrative 250 m zones around demo observations,
         not verified flood boundaries.
       </p>
     </div>
@@ -102,6 +142,7 @@ function RiskLegend() {
 
 export default function RiskMap({
   observations,
+  shelters,
   userLocation,
 }: RiskMapProps) {
   const center: LatLngExpression = [
@@ -122,16 +163,13 @@ export default function RiskMap({
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           eventHandlers={{
             tileerror: () => {
-              console.warn(
-                "A map tile failed to load. Check browser Network tools."
-              );
+              console.warn("A map tile failed to load.");
             },
           }}
         />
 
         <MapRefresher position={center} />
 
-        {/* Demo user location */}
         <CircleMarker
           center={center}
           radius={8}
@@ -151,7 +189,6 @@ export default function RiskMap({
           </Tooltip>
         </CircleMarker>
 
-        {/* Risk observation circles */}
         {observations.map((observation) => (
           <Circle
             key={observation.id}
@@ -181,6 +218,28 @@ export default function RiskMap({
               Historical risk: {observation.historical_risk}
             </Tooltip>
           </Circle>
+        ))}
+
+        {shelters.map((shelter) => (
+          <Marker
+            key={shelter.id}
+            position={[shelter.latitude, shelter.longitude]}
+            icon={shelterIcon}
+          >
+            <Tooltip>
+              <strong>{shelter.name}</strong>
+              <br />
+              Available capacity: {shelter.available_capacity}
+              <br />
+              Occupancy: {shelter.current_occupancy}/{shelter.capacity}
+              <br />
+              Medical: {shelter.has_medical ? "Available" : "Unavailable"}
+              <br />
+              Food: {shelter.has_food ? "Available" : "Unavailable"}
+              <br />
+              Water: {shelter.has_water ? "Available" : "Unavailable"}
+            </Tooltip>
+          </Marker>
         ))}
       </MapContainer>
 

@@ -324,3 +324,101 @@ footer {
     padding: 10px;
   }
 }
+
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.refresh-button {
+  border: 0;
+  border-radius: 8px;
+  padding: 10px 14px;
+  background: #1d4ed8;
+  color: white;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.refresh-button:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.shelter-summary {
+  margin-top: 12px;
+}
+
+.shelter-dot {
+  background: #0f766e;
+}
+
+.capacity-dot {
+  background: #2563eb;
+}
+
+.resqnet-shelter-icon {
+  background: transparent;
+  border: 0;
+}
+
+.shelter-marker-pin {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 2px solid white;
+  border-radius: 50%;
+  background: #0f766e;
+  color: white;
+  font-size: 14px;
+  font-weight: 800;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+
+.shelter-legend-marker,
+.user-legend-marker {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  color: white;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.shelter-legend-marker {
+  background: #0f766e;
+}
+
+.user-legend-marker {
+  border: 2px solid white;
+  background: #2563eb;
+  box-shadow: 0 0 0 1px #2563eb;
+}
+
+.shelter-list-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: #ccfbf1;
+  color: #0f766e;
+  font-size: 20px;
+}
+
+@media (max-width: 600px) {
+  .header-actions {
+    align-items: flex-start;
+  }
+}
