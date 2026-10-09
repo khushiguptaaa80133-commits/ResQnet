@@ -3,11 +3,24 @@ from sqlalchemy import text
 
 from app.database import engine
 
+from fastapi.middleware.cors import CORSMiddleware
+
 
 app = FastAPI(
     title="ResQNet API",
     description="AI-Powered Disaster Management & Emergency Response Platform",
     version="1.0.0"
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
@@ -526,3 +539,79 @@ def calculate_risk_score(
 
             "observed_at": observation.observed_at
         }
+
+
+@app.get("/api/risk/zones")
+def get_risk_zones():
+    with engine.connect() as connection:
+        result = connection.execute(
+            text("""
+                SELECT
+                    id,
+                    latitude,
+                    longitude,
+                    rainfall_mm,
+                    water_level_m,
+                    elevation_m,
+                    historical_risk,
+                    observed_at
+                FROM risk_observations
+                ORDER BY id
+            """)
+        )
+
+        observations = result.fetchall()
+
+    zones = []
+
+    for observation in observations:
+        rainfall_score = min(observation.rainfall_mm / 100, 1)
+        water_level_score = min(observation.water_level_m / 5, 1)
+
+        elevation_score = max(
+            0,
+            min((600 - observation.elevation_m) / 200, 1)
+        )
+
+        historical_score = max(
+            0,
+            min(observation.historical_risk, 1)
+        )
+
+        risk_score = round(
+            (
+                rainfall_score * 0.35
+                + water_level_score * 0.35
+                + elevation_score * 0.10
+                + historical_score * 0.20
+            ) * 100,
+            2
+        )
+
+        if risk_score < 30:
+            risk_level = "LOW"
+        elif risk_score < 55:
+            risk_level = "MODERATE"
+        elif risk_score < 75:
+            risk_level = "HIGH"
+        else:
+            risk_level = "CRITICAL"
+
+        zones.append({
+            "id": observation.id,
+            "latitude": observation.latitude,
+            "longitude": observation.longitude,
+            "rainfall_mm": observation.rainfall_mm,
+            "water_level_m": observation.water_level_m,
+            "elevation_m": observation.elevation_m,
+            "historical_risk": observation.historical_risk,
+            "risk_score": risk_score,
+            "risk_level": risk_level,
+            "observed_at": observation.observed_at,
+        })
+
+    return {
+        "count": len(zones),
+        "zones": zones,
+        "data_note": "Prototype risk scores based on seeded observations and a rule-based formula; not validated flood predictions."
+    }
